@@ -1,0 +1,83 @@
+---
+- name: Security Stack - Playbook Multi-OS
+  hosts: all
+  become: yes
+  vars:
+    wazuh_manager_ip: "192.168.1.10"
+    openvas_server_ip: "192.168.1.20"
+
+  tasks:
+    - name: Aggiornamento pacchetti Linux
+      package:
+        name: "*"
+        state: latest
+      when: ansible_os_family in ["Debian", "RedHat"]
+
+    - name: Aggiornamento patch Windows
+      win_updates:
+        category_names:
+          - SecurityUpdates
+          - CriticalUpdates
+      when: ansible_os_family == "Windows"
+
+    - name: Installazione Wazuh Agent (Debian/Ubuntu)
+      shell: |
+        curl -s https://packages.wazuh.com/key/GPG-KEY-WAZUH | apt-key add -
+        echo "deb https://packages.wazuh.com/4.x/apt stable main" | tee /etc/apt/sources.list.d/wazuh.list
+        apt-get update
+        apt-get install wazuh-agent -y
+      when: ansible_os_family == "Debian"
+
+    - name: Installazione Wazuh Agent (RedHat/CentOS)
+      shell: |
+        rpm --import https://packages.wazuh.com/key/GPG-KEY-WAZUH
+        cat > /etc/yum.repos.d/wazuh.repo <<EOF
+        [wazuh]
+        name=Wazuh repository
+        baseurl=https://packages.wazuh.com/4.x/yum/
+        gpgcheck=1
+        gpgkey=https://packages.wazuh.com/key/GPG-KEY-WAZUH
+        enabled=1
+        EOF
+        yum install wazuh-agent -y
+      when: ansible_os_family == "RedHat"
+
+    - name: Installazione Wazuh Agent (Windows)
+      win_package:
+        path: "https://packages.wazuh.com/4.x/windows/wazuh-agent-4.x.msi"
+        arguments: /quiet
+        state: present
+      when: ansible_os_family == "Windows"
+
+    - name: Configurazione Wazuh Agent Linux
+      lineinfile:
+        path: /var/ossec/etc/ossec.conf
+        regexp: '<address>.*</address>'
+        line: "<address>{{ wazuh_manager_ip }}</address>"
+      notify: restart wazuh-agent
+      when: ansible_os_family in ["Debian", "RedHat"]
+
+    - name: Configurazione Wazuh Agent Windows
+      win_lineinfile:
+        path: 'C:\Program Files (x86)\ossec-agent\ossec.conf'
+        regexp: '<address>.*</address>'
+        line: "<address>{{ wazuh_manager_ip }}</address>"
+      when: ansible_os_family == "Windows"
+
+    - name: Installazione OpenVAS CLI Linux
+      package:
+        name: gvm-cli
+        state: present
+      when: ansible_os_family in ["Debian", "RedHat"]
+
+    - name: Esecuzione scansione OpenVAS Linux
+      shell: |
+        gvm-cli ssh --hostname {{ openvas_server_ip }} --gmp-username admin --gmp-password 'PASSWORD' socket --xml "<create_target><name>{{ inventory_hostname }}</name><hosts>{{ ansible_host }}</hosts></create_target>"
+      ignore_errors: yes
+      when: ansible_os_family in ["Debian", "RedHat"]
+
+  handlers:
+    - name: restart wazuh-agent
+      service:
+        name: wazuh-agent
+        state: restarted

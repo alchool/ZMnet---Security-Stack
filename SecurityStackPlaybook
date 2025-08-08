@@ -1,0 +1,45 @@
+---
+- name: Security Stack - Playbook  # Nome del playbook per gestione stack di sicurezza
+  hosts: all  # Definisce che il playbook verrà eseguito su tutti gli host del file inventory
+  become: yes  # Esegue i comandi con privilegi di amministratore (sudo)
+  vars:
+    wazuh_manager_ip: "192.168.1.10"  # Indirizzo IP del server Wazuh Manager a cui connettere l'agente (personalizzare con l'IP reale)
+    openvas_server_ip: "192.168.1.20"  # Indirizzo IP del server OpenVAS per le scansioni (personalizzare con l'IP reale)
+
+  tasks:
+
+    - name: Aggiorna pacchetti di sistema (patch management)  # Mantiene il sistema aggiornato installando le ultime patch
+      package:
+        name: "*"  # Aggiorna tutti i pacchetti disponibili
+        state: latest  # Imposta lo stato dei pacchetti all'ultima versione
+
+    - name: Installa Wazuh Agent  # Installa il client Wazuh per monitoraggio e sicurezza
+      shell: |
+        curl -s https://packages.wazuh.com/key/GPG-KEY-WAZUH | apt-key add -  # Aggiunge la chiave GPG di Wazuh
+        echo "deb https://packages.wazuh.com/4.x/apt stable main" | tee /etc/apt/sources.list.d/wazuh.list  # Aggiunge il repository Wazuh
+        apt-get update  # Aggiorna la lista dei pacchetti
+        apt-get install wazuh-agent -y  # Installa il pacchetto wazuh-agent
+      when: ansible_os_family == "Debian"  # Esegue il task solo su sistemi basati su Debian
+
+    - name: Configura Wazuh Agent  # Configura l'agente Wazuh per connettersi al manager
+      lineinfile:
+        path: /var/ossec/etc/ossec.conf  # File di configurazione dell'agente
+        regexp: '<address>.*</address>'  # Trova la riga con l'indirizzo esistente
+        line: "<address>{{ wazuh_manager_ip }}</address>"  # Imposta l'IP del Wazuh Manager definito nelle variabili
+      notify: restart wazuh-agent  # Avvia il handler per riavviare il servizio dopo la modifica
+
+    - name: Installa OpenVAS CLI  # Installa il client a riga di comando per OpenVAS
+      package:
+        name: gvm-cli  # Nome del pacchetto da installare
+        state: present  # Garantisce che il pacchetto sia installato
+
+    - name: Esegui scansione OpenVAS (host locale)  # Lancia una scansione di sicurezza tramite OpenVAS sul sistema target
+      shell: |
+        gvm-cli ssh --hostname {{ openvas_server_ip }} --gmp-username admin --gmp-password 'PASSWORD' socket --xml "<create_target><name>{{ inventory_hostname }}</name><hosts>{{ ansible_host }}</hosts></create_target>"  # Comando CLI per avviare la scansione (sostituire PASSWORD con credenziali reali)
+      ignore_errors: yes  # Evita che il playbook si interrompa in caso di errore nella scansione
+
+  handlers:
+    - name: restart wazuh-agent  # Handler per riavviare l'agente Wazuh dopo modifiche
+      service:
+        name: wazuh-agent  # Nome del servizio da riavviare
+        state: restarted  # Stato richiesto del servizio

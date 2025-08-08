@@ -18,3 +18,4 @@
                                                            |                             |
                                                            v                             v
                                                        [GLPI/OCS]  <---Webhook---  [Ansible Playbooks]
+<img width="854" height="306" alt="image" src="https://github.com/user-attachments/assets/b04805bc-5715-4aa4-93af-970a7eaecc9e" />
